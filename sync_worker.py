@@ -20,13 +20,19 @@ DB_NAME = "kvatt_green_package_shopify_app"
 TABLE_NAME = "orders"
 EXPORT_URL = f"{BASE_URL}?route=/table/export&db={DB_NAME}&table={TABLE_NAME}&single_table=true"
 
-# Fixed paths for your PythonAnywhere deployment
-HOME = "/home/kvatt"
-PROJECT_DIR = os.path.join(HOME, "mysite")
+# Smart Path Handling (Works locally AND on PythonAnywhere)
+if os.name == 'nt': # Windows (Local Machine)
+    PROJECT_DIR = os.getcwd()
+else: # Linux (PythonAnywhere)
+    HOME = os.path.expanduser("~")
+    PROJECT_DIR = os.path.join(HOME, "mysite")
+
 DOWNLOAD_DIR = os.path.join(PROJECT_DIR, "downloads")
 CACHE_FILE = os.path.join(PROJECT_DIR, "data_cache.json")
-
 if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
+
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
 
 def get_driver():
     options = Options()
@@ -39,7 +45,12 @@ def get_driver():
     
     # PythonAnywhere works best with these specifically
     options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
-    return webdriver.Chrome(options=options)
+    
+    if os.name == 'nt': # LOCAL WINDOWS
+        service = Service(ChromeDriverManager().install())
+        return webdriver.Chrome(service=service, options=options)
+    else: # PYTHONANYWHERE (Linux)
+        return webdriver.Chrome(options=options)
 
 def perform_sync():
     driver = None

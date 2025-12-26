@@ -7,9 +7,13 @@ app = Flask(__name__)
 CORS(app)
 
 # --- CONFIGURATION ---
-# Fixed paths for your PythonAnywhere deployment
-HOME = "/home/kvatt"
-PROJECT_DIR = os.path.join(HOME, "mysite")
+# --- CONFIGURATION ---
+if os.name == 'nt': # Windows (Local Machine)
+    PROJECT_DIR = os.getcwd()
+else: # Linux (PythonAnywhere)
+    HOME = os.path.expanduser("~")
+    PROJECT_DIR = os.path.join(HOME, "mysite")
+
 CACHE_FILE = os.path.join(PROJECT_DIR, "data_cache.json")
 API_KEY = "shopify_secure_key_2025" # Must match what you use in your headers
 

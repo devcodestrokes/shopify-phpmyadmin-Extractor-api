@@ -1,4 +1,7 @@
 import os
+# Disable webdriver-manager usage stats to prevent "Error sending stats to Plausible"
+os.environ["WDM_DISABLE_USAGE"] = "1"
+
 import time
 import pandas as pd
 import json

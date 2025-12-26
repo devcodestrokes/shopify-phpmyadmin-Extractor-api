@@ -39,18 +39,52 @@ def get_driver():
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--verbose")
+    
     # PythonAnywhere specific FIX for ERR_TUNNEL_CONNECTION_FAILED:
     options.add_argument('--proxy-server=direct://')
     options.add_argument('--proxy-bypass-list=*')
     
-    # PythonAnywhere works best with these specifically
-    options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
-    
-    if os.name == 'nt': # LOCAL WINDOWS
-        service = Service(ChromeDriverManager().install())
-        return webdriver.Chrome(service=service, options=options)
-    else: # PYTHONANYWHERE (Linux)
-        return webdriver.Chrome(options=options)
+    # Check for PythonAnywhere environment
+    # (PythonAnywhere sets 'PYTHONANYWHERE_DOMAIN' or 'PYTHONANYWHERE_SITE' env vars)
+    if 'PYTHONANYWHERE_DOMAIN' in os.environ or os.path.exists('/home/kvatt'):
+        print("Detected PythonAnywhere Environment. Configuring driver...", flush=True)
+        options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
+        
+        # 1. Try finding the chromium binary explicitly
+        paths = ["/usr/bin/chromium", "/usr/bin/chromium-browser"]
+        found_bin = None
+        for p in paths:
+            if os.path.exists(p):
+                found_bin = p
+                break
+        
+        if found_bin:
+            print(f"Found chromium binary at: {found_bin}", flush=True)
+            options.binary_location = found_bin
+        
+        # 2. Try using the system chromedriver
+        try:
+            service = Service("/usr/bin/chromedriver")
+            driver = webdriver.Chrome(service=service, options=options)
+            return driver
+        except Exception as e:
+            print(f"Failed to use system /usr/bin/chromedriver: {e}", flush=True)
+            # Fallback to default initialization if explicit service fails
+            pass
+
+    # Local Windows / General Fallback
+    try:
+        options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
+        if os.name == 'nt': # LOCAL WINDOWS
+            service = Service(ChromeDriverManager().install())
+            return webdriver.Chrome(service=service, options=options)
+        else: # Standard Linux
+            return webdriver.Chrome(options=options)
+    except Exception as e:
+        print(f"Fatal Driver Error: {e}", flush=True)
+        raise e
 
 def perform_sync():
     driver = None

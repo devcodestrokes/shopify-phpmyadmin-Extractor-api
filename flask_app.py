@@ -8,12 +8,7 @@ CORS(app)
 
 # --- CONFIGURATION ---
 # --- CONFIGURATION ---
-if os.name == 'nt': # Windows (Local Machine)
-    PROJECT_DIR = os.getcwd()
-else: # Linux (PythonAnywhere)
-    HOME = os.path.expanduser("~")
-    PROJECT_DIR = os.path.join(HOME, "mysite")
-
+PROJECT_DIR = os.getcwd()
 CACHE_FILE = os.path.join(PROJECT_DIR, "data_cache.json")
 API_KEY = "shopify_secure_key_2025" # Must match what you use in your headers
 

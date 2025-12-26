@@ -13,6 +13,7 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 
 # --- CONFIGURATION (Match your account) ---
+# --- CONFIGURATION (Match your account) ---
 BASE_URL = "https://shopify.kvatt.com/d4ad5e396a34d97dae65c09957e17fecd326658d/index.php"
 USERNAME = "kvatt_green_package_shopify_app"
 PASSWORD = "esas8ZDsIu!52"
@@ -20,13 +21,8 @@ DB_NAME = "kvatt_green_package_shopify_app"
 TABLE_NAME = "orders"
 EXPORT_URL = f"{BASE_URL}?route=/table/export&db={DB_NAME}&table={TABLE_NAME}&single_table=true"
 
-# Smart Path Handling (Works locally AND on PythonAnywhere)
-if os.name == 'nt': # Windows (Local Machine)
-    PROJECT_DIR = os.getcwd()
-else: # Linux (PythonAnywhere)
-    HOME = os.path.expanduser("~")
-    PROJECT_DIR = os.path.join(HOME, "mysite")
-
+# Docker / Local Path Handling
+PROJECT_DIR = os.getcwd()
 DOWNLOAD_DIR = os.path.join(PROJECT_DIR, "downloads")
 CACHE_FILE = os.path.join(PROJECT_DIR, "data_cache.json")
 if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)

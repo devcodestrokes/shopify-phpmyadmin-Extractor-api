@@ -106,6 +106,12 @@ def perform_sync():
         if driver: driver.quit()
 
 if __name__ == "__main__":
+    print("Worker started...", flush=True) # flush=True forces output to appear immediately
     while True:
-        perform_sync()
+        try:
+            perform_sync()
+        except Exception as e:
+            print(f"CRITICAL WORKER FAIL: {str(e)}", flush=True)
+        
+        print("Sleeping for 1 hour...", flush=True)
         time.sleep(3600) # Sync once per hour

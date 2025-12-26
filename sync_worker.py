@@ -33,6 +33,10 @@ def get_driver():
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    # PythonAnywhere specific FIX for ERR_TUNNEL_CONNECTION_FAILED:
+    options.add_argument('--proxy-server=direct://')
+    options.add_argument('--proxy-bypass-list=*')
+    
     # PythonAnywhere works best with these specifically
     options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
     return webdriver.Chrome(options=options)

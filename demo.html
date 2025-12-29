@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shopify Data API - Demo</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .header {
+        text-align: center;
+        color: white;
+        margin-bottom: 40px;
+      }
+
+      .header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 10px;
+      }
+
+      .header p {
+        font-size: 1.1rem;
+        opacity: 0.9;
+      }
+
+      .card {
+        background: white;
+        border-radius: 15px;
+        padding: 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      }
+
+      .config-section {
+        margin-bottom: 30px;
+      }
+
+      .config-section h3 {
+        color: #667eea;
+        margin-bottom: 15px;
+      }
+
+      .input-group {
+        margin-bottom: 15px;
+      }
+
+      .input-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+        color: #333;
+      }
+
+      .input-group input,
+      .input-group select {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 1rem;
+        transition: border-color 0.3s;
+      }
+
+      .input-group input:focus,
+      .input-group select:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        padding: 12px 30px;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+      }
+
+      .btn-secondary {
+        background: #f0f0f0;
+        color: #333;
+      }
+
+      .btn-secondary:hover {
+        background: #e0e0e0;
+      }
+
+      .btn-refresh {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        color: white;
+      }
+
+      .btn-refresh:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(56, 239, 125, 0.4);
+      }
+
+      .status-bar {
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .status-loading {
+        background: #fff3cd;
+        color: #856404;
+        border: 2px solid #ffeaa7;
+      }
+
+      .status-success {
+        background: #d4edda;
+        color: #155724;
+        border: 2px solid #c3e6cb;
+      }
+
+      .status-error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 2px solid #f5c6cb;
+      }
+
+      .spinner {
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(0, 0, 0, 0.1);
+        border-top-color: currentColor;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .data-display {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 20px;
+        max-height: 500px;
+        overflow-y: auto;
+      }
+
+      .data-display h4 {
+        color: #667eea;
+        margin-bottom: 10px;
+      }
+
+      .data-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+
+      .stat-box {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+      }
+
+      .stat-label {
+        font-size: 0.9rem;
+        color: #666;
+        margin-bottom: 5px;
+      }
+
+      .stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #333;
+      }
+
+      pre {
+        background: #2d2d2d;
+        color: #f8f8f2;
+        padding: 15px;
+        border-radius: 8px;
+        overflow-x: auto;
+        font-size: 0.9rem;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-left: 10px;
+      }
+
+      .badge-cached {
+        background: #ffeaa7;
+        color: #856404;
+      }
+
+      .badge-updated {
+        background: #55efc4;
+        color: #00b894;
+      }
+
+      .logs {
+        background: #2d2d2d;
+        color: #f8f8f2;
+        padding: 15px;
+        border-radius: 8px;
+        max-height: 300px;
+        overflow-y: auto;
+        font-family: "Courier New", monospace;
+        font-size: 0.9rem;
+      }
+
+      .log-entry {
+        margin-bottom: 8px;
+        padding: 5px;
+      }
+
+      .log-info {
+        color: #61dafb;
+      }
+
+      .log-success {
+        color: #55efc4;
+      }
+
+      .log-error {
+        color: #ff7675;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🚀 Shopify Data API Demo</h1>
+        <p>Test the caching API with real-time updates</p>
+      </div>
+
+      <div class="card">
+        <div class="config-section">
+          <h3>⚙️ Configuration</h3>
+          <div class="input-group">
+            <label for="apiUrl">API Base URL</label>
+            <input
+              type="text"
+              id="apiUrl"
+              value="http://localhost:5000"
+              placeholder="https://your-api.onrender.com"
+            />
+          </div>
+          <div class="input-group">
+            <label for="apiKey">API Key</label>
+            <input
+              type="password"
+              id="apiKey"
+              value="shopify_secure_key_2025"
+            />
+          </div>
+          <div class="input-group">
+            <label for="fetchMode">Fetch Mode</label>
+            <select id="fetchMode">
+              <option value="simple">Simple (Cached Only)</option>
+              <option value="refresh">With Refresh (Background Update)</option>
+              <option value="stream">Stream (SSE - Cached + Updated)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="button-group">
+          <button class="btn-primary" onclick="fetchData()">
+            📦 Fetch Data
+          </button>
+          <button class="btn-refresh" onclick="manualRefresh()">
+            🔄 Manual Refresh
+          </button>
+          <button class="btn-secondary" onclick="checkStatus()">
+            📊 Check Status
+          </button>
+          <button class="btn-secondary" onclick="clearLogs()">
+            🗑️ Clear Logs
+          </button>
+        </div>
+      </div>
+
+      <div id="statusBar" style="display: none"></div>
+
+      <div class="card" id="dataCard" style="display: none">
+        <h3>📊 Data Response</h3>
+        <div class="data-stats" id="dataStats"></div>
+        <div class="data-display">
+          <h4>Sample Records (First 5)</h4>
+          <pre id="dataPreview"></pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>📝 Activity Logs</h3>
+        <div class="logs" id="logs">
+          <div class="log-entry log-info">
+            Ready to start. Configure settings above and click "Fetch Data".
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let eventSource = null;
+
+      function log(message, type = "info") {
+        const logsDiv = document.getElementById("logs");
+        const entry = document.createElement("div");
+        entry.className = `log-entry log-${type}`;
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logsDiv.appendChild(entry);
+        logsDiv.scrollTop = logsDiv.scrollHeight;
+      }
+
+      function clearLogs() {
+        document.getElementById("logs").innerHTML =
+          '<div class="log-entry log-info">Logs cleared.</div>';
+      }
+
+      function showStatus(message, type = "loading") {
+        const statusBar = document.getElementById("statusBar");
+        statusBar.style.display = "block";
+        statusBar.className = `status-bar status-${type}`;
+
+        let icon = "";
+        if (type === "loading") icon = '<div class="spinner"></div>';
+        else if (type === "success") icon = "✅";
+        else if (type === "error") icon = "❌";
+
+        statusBar.innerHTML = `${icon} ${message}`;
+      }
+
+      function hideStatus() {
+        document.getElementById("statusBar").style.display = "none";
+      }
+
+      function displayData(data, isCached = false) {
+        const dataCard = document.getElementById("dataCard");
+        const dataStats = document.getElementById("dataStats");
+        const dataPreview = document.getElementById("dataPreview");
+
+        dataCard.style.display = "block";
+
+        // Display stats
+        const badge = isCached
+          ? '<span class="badge badge-cached">CACHED</span>'
+          : '<span class="badge badge-updated">UPDATED</span>';
+
+        dataStats.innerHTML = `
+                <div class="stat-box">
+                    <div class="stat-label">Status ${badge}</div>
+                    <div class="stat-value">${data.status || "N/A"}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Record Count</div>
+                    <div class="stat-value">${data.count || 0}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Last Updated</div>
+                    <div class="stat-value" style="font-size: 1rem;">${
+                      data.last_updated || "N/A"
+                    }</div>
+                </div>
+            `;
+
+        // Display sample data
+        if (data.data && data.data.length > 0) {
+          const sample = data.data.slice(0, 5);
+          dataPreview.textContent = JSON.stringify(sample, null, 2);
+        } else {
+          dataPreview.textContent = "No data records available.";
+        }
+      }
+
+      async function fetchData() {
+        const apiUrl = document.getElementById("apiUrl").value;
+        const apiKey = document.getElementById("apiKey").value;
+        const mode = document.getElementById("fetchMode").value;
+
+        // Close any existing SSE connection
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+
+        if (mode === "stream") {
+          fetchWithSSE();
+          return;
+        }
+
+        const refresh = mode === "refresh" ? "?refresh=true" : "";
+        const url = `${apiUrl}/fetch-data${refresh}`;
+
+        log(`Fetching data from: ${url}`, "info");
+        showStatus("Fetching data...", "loading");
+
+        try {
+          const response = await fetch(url, {
+            method: "GET",
+            headers: {
+              "X-API-Key": apiKey,
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const data = await response.json();
+
+          if (data.status === "success") {
+            log(
+              `✅ Data fetched successfully! ${data.count} records.`,
+              "success"
+            );
+            showStatus("Data loaded successfully!", "success");
+            displayData(data, true);
+
+            if (data._info) {
+              log(`ℹ️ ${data._info}`, "info");
+            }
+          } else {
+            log(`⚠️ ${data.message}`, "error");
+            showStatus(data.message, "error");
+          }
+
+          setTimeout(hideStatus, 3000);
+        } catch (error) {
+          log(`❌ Error: ${error.message}`, "error");
+          showStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      function fetchWithSSE() {
+        const apiUrl = document.getElementById("apiUrl").value;
+        const apiKey = document.getElementById("apiKey").value;
+        const url = `${apiUrl}/fetch-data?stream=true&refresh=true`;
+
+        log(`Starting SSE connection to: ${url}`, "info");
+        showStatus("Waiting for data stream...", "loading");
+
+        // Note: EventSource doesn't support custom headers directly
+        // You may need to pass API key as query param or use a different approach
+        // For demo purposes, we'll use fetch with streaming
+
+        fetch(url, {
+          method: "GET",
+          headers: {
+            "X-API-Key": apiKey,
+          },
+        })
+          .then((response) => {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            function read() {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  log("✅ Stream completed", "success");
+                  showStatus("Stream completed!", "success");
+                  setTimeout(hideStatus, 3000);
+                  return;
+                }
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split("\n");
+
+                for (const line of lines) {
+                  if (line.startsWith("data: ")) {
+                    const jsonData = line.substring(6);
+                    try {
+                      const event = JSON.parse(jsonData);
+
+                      if (event.type === "cached") {
+                        log("📦 Received cached data", "info");
+                        displayData(event.payload, true);
+                        showStatus(
+                          "Cached data loaded. Waiting for updated data...",
+                          "loading"
+                        );
+                      } else if (event.type === "updated") {
+                        log("✅ Received updated data!", "success");
+                        displayData(event.payload, false);
+                        showStatus("Updated data received!", "success");
+                      } else if (event.type === "error") {
+                        log(`❌ ${event.message}`, "error");
+                        showStatus(`Error: ${event.message}`, "error");
+                      } else if (event.type === "done") {
+                        log("🏁 Stream finished", "success");
+                        return;
+                      }
+                    } catch (e) {
+                      // Ignore parsing errors for incomplete chunks
+                    }
+                  }
+                }
+
+                read();
+              });
+            }
+
+            read();
+          })
+          .catch((error) => {
+            log(`❌ SSE Error: ${error.message}`, "error");
+            showStatus(`Error: ${error.message}`, "error");
+          });
+      }
+
+      async function manualRefresh() {
+        const apiUrl = document.getElementById("apiUrl").value;
+        const apiKey = document.getElementById("apiKey").value;
+        const url = `${apiUrl}/refresh`;
+
+        log(`Triggering manual refresh...`, "info");
+        showStatus("Triggering refresh...", "loading");
+
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "X-API-Key": apiKey,
+            },
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            log(`✅ ${data.message}`, "success");
+            showStatus(data.message, "success");
+          } else {
+            log(`⚠️ ${data.message}`, "error");
+            showStatus(data.message, "error");
+          }
+
+          setTimeout(hideStatus, 3000);
+        } catch (error) {
+          log(`❌ Error: ${error.message}`, "error");
+          showStatus(`Error: ${error.message}`, "error");
+        }
+      }
+
+      async function checkStatus() {
+        const apiUrl = document.getElementById("apiUrl").value;
+        const apiKey = document.getElementById("apiKey").value;
+        const url = `${apiUrl}/status`;
+
+        log(`Checking API status...`, "info");
+
+        try {
+          const response = await fetch(url, {
+            method: "GET",
+            headers: {
+              "X-API-Key": apiKey,
+            },
+          });
+
+          const data = await response.json();
+
+          log(`📊 API Status: ${data.api_status}`, "success");
+          log(`📦 Cache exists: ${data.cache_exists}`, "info");
+          if (data.cache_age_minutes !== null) {
+            log(`⏱️ Cache age: ${data.cache_age_minutes} minutes`, "info");
+          }
+          log(`🔄 Update in progress: ${data.update_in_progress}`, "info");
+        } catch (error) {
+          log(`❌ Error: ${error.message}`, "error");
+        }
+      }
+    </script>
+  </body>
+</html>

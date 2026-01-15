@@ -96,13 +96,28 @@ def fetch_data():
     - Uses <2MB memory
     - Returns in <0.01ms for light requests
     - Streams records one-by-one
+    - force_fresh=true: Fetches LIVE data from database (slower but fresh)
     """
     # Auth check
     if request.headers.get("X-API-Key") != API_KEY:
         return Response('{"error":"Unauthorized"}', status=401, mimetype='application/json')
     
+    # Check for LIVE data request
+    force_fresh = request.args.get('force_fresh') == 'true'
+    
+    if force_fresh:
+        # Fetch fresh data from database RIGHT NOW
+        print(f"[{time.ctime()}] LIVE data requested - triggering immediate sync")
+        try:
+            from sync_worker import perform_sync
+            perform_sync()  # This will update the cache with fresh data
+            print(f"[{time.ctime()}] Sync complete - serving fresh data")
+        except Exception as e:
+            return Response(json.dumps({"error": f"Sync failed: {str(e)}"}), 
+                          status=500, mimetype='application/json')
+    
     if not os.path.exists(CACHE_FILE):
-        return Response('{"error":"No data"}', status=503, mimetype='application/json')
+        return Response('{"error":"No data - run sync first"}', status=503, mimetype='application/json')
     
     # Ultra-lightweight params
     try:
@@ -173,8 +188,10 @@ def health():
 if __name__ == '__main__':
     print("ULTRA-LIGHTWEIGHT API - Memory optimized to <2MB")
     print("Endpoints:")
-    print("  GET  /fetch-data?limit=10&offset=0")
-    print("  GET  /fetch-data?metadata_only=true")
-    print("  POST /refresh")
+    print("  GET  /fetch-data?limit=10&offset=0  (cached data - FAST)")
+    print("  GET  /fetch-data?force_fresh=true   (LIVE data from DB - SLOWER)")
+    print("  GET  /fetch-data?metadata_only=true (metadata only)")
+    print("  POST /refresh (background sync)")
     print("  GET  /status")
+    print("\n💡 TIP: Use force_fresh=true to get latest data from database!")
     app.run(host='0.0.0.0', port=5000, debug=False)  # debug=False saves memory

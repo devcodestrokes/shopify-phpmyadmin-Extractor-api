@@ -73,25 +73,45 @@ def fetch_data():
     - Uses <2MB memory
     - Returns in <0.01ms for light requests
     - Streams records one-by-one
-    - force_fresh=true: Fetches LIVE data from database (slower but fresh)
+    - force_fresh=true: Triggers background refresh, returns immediately
     """
     # Auth check
     if request.headers.get("X-API-Key") != API_KEY:
         return Response('{"error":"Unauthorized"}', status=401, mimetype='application/json')
     
-    # Check for LIVE data request
+    # Check for LIVE data request (non-blocking)
     force_fresh = request.args.get('force_fresh') == 'true'
     
     if force_fresh:
-        # Fetch fresh data from database RIGHT NOW
-        print(f"[{time.ctime()}] LIVE data requested - triggering immediate sync")
-        try:
-            from sync_worker import perform_sync
-            perform_sync()  # This will update the cache with fresh data
-            print(f"[{time.ctime()}] Sync complete - serving fresh data")
-        except Exception as e:
-            return Response(json.dumps({"error": f"Sync failed: {str(e)}"}), 
-                          status=500, mimetype='application/json')
+        # Trigger background refresh (DON'T WAIT - prevents timeout!)
+        global update_in_progress
+        if not update_in_progress:
+            def background_refresh():
+                global update_in_progress
+                update_in_progress = True
+                try:
+                    print(f"[{time.ctime()}] Background refresh triggered by force_fresh")
+                    from sync_worker import perform_sync
+                    perform_sync()
+                    print(f"[{time.ctime()}] Background refresh complete")
+                except Exception as e:
+                    print(f"Background refresh error: {e}")
+                finally:
+                    update_in_progress = False
+            
+            thread = threading.Thread(target=background_refresh, daemon=True)
+            thread.start()
+            
+            return Response(json.dumps({
+                "status": "refresh_triggered",
+                "message": "Background sync started. Cache will be updated in 30-60 seconds. Try again in a minute.",
+                "recommendation": "Use POST /refresh endpoint for background updates"
+            }), mimetype='application/json')
+        else:
+            return Response(json.dumps({
+                "status": "already_updating",
+                "message": "Sync already in progress. Try again in a minute."
+            }), mimetype='application/json')
     
     if not os.path.exists(CACHE_FILE):
         return Response('{"error":"No data - run sync first"}', status=503, mimetype='application/json')

@@ -15,52 +15,29 @@ API_KEY = "shopify_secure_key_2025"
 CACHE_LOCK = threading.Lock()
 update_in_progress = False
 
-# Ultra-lightweight streaming - reads line by line
+# Lightweight JSON record streaming
 def stream_json_records(file_path, limit=10, offset=0):
     """
-    Generator that yields records one at a time from JSON file.
-    MEMORY: ~2MB max, processes in microseconds
+    Generator that yields records from JSON file.
+    Loads file once, then streams records.
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            # Read file character by character to find data array
-            content = ""
-            in_data_array = False
-            bracket_level = 0
-            record_buffer = ""
-            record_count = 0
-            records_yielded = 0
+            data = json.load(f)
+        
+        records = data.get('data', [])
+        
+        # Apply offset and limit
+        start_idx = offset
+        end_idx = min(offset + limit, len(records))
+        
+        for record in records[start_idx:end_idx]:
+            yield record
             
-            for line in f:
-                if '"data":' in line and '[' in line:
-                    in_data_array = True
-                    continue
-                
-                if in_data_array:
-                    for char in line:
-                        if char == '{':
-                            bracket_level += 1
-                            record_buffer += char
-                        elif char == '}':
-                            bracket_level -= 1
-                            record_buffer += char
-                            if bracket_level == 0 and record_buffer.strip():
-                                # Complete record found
-                                if record_count >= offset and records_yielded < limit:
-                                    try:
-                                        yield json.loads(record_buffer.strip())
-                                        records_yielded += 1
-                                    except:
-                                        pass
-                                record_count += 1
-                                record_buffer = ""
-                                
-                                if records_yielded >= limit:
-                                    return
-                        elif bracket_level > 0:
-                            record_buffer += char
     except Exception as e:
         print(f"Stream error: {e}")
+        import traceback
+        traceback.print_exc()
         return
 
 def get_lightweight_metadata():

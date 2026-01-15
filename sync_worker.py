@@ -29,36 +29,94 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 
 def get_driver():
-    """Ultra-lightweight browser config"""
+    """
+    Smart driver detection for PythonAnywhere, Render, and Local environments
+    """
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-extensions")
     options.add_argument('--proxy-server=direct://')
     options.add_argument('--proxy-bypass-list=*')
+    options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
     
-    # PythonAnywhere detection
-    if 'PYTHONANYWHERE_DOMAIN' in os.environ or os.path.exists('/home/kvatt'):
-        print("PythonAnywhere environment detected", flush=True)
-        options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
+    # === PYTHONANYWHERE DETECTION ===
+    is_pythonanywhere = (
+        'PYTHONANYWHERE_DOMAIN' in os.environ or 
+        'PYTHONANYWHERE_SITE' in os.environ or
+        os.path.exists('/home') and not os.path.exists('C:\\')
+    )
+    
+    if is_pythonanywhere:
+        print("🐍 PythonAnywhere environment detected", flush=True)
         
-        # Find chromium
-        for path in ["/usr/bin/chromium", "/usr/bin/chromium-browser"]:
+        # Try multiple Chrome/Chromium paths (PythonAnywhere-specific)
+        chrome_paths = [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser", 
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/snap/bin/chromium"
+        ]
+        
+        chromedriver_paths = [
+            "/usr/bin/chromedriver",
+            "/usr/local/bin/chromedriver",
+            "/home/{}/.local/bin/chromedriver".format(os.environ.get('USER', 'unknown'))
+        ]
+        
+        chrome_binary = None
+        for path in chrome_paths:
             if os.path.exists(path):
-                options.binary_location = path
+                chrome_binary = path
+                print(f"   ✅ Found Chrome at: {path}", flush=True)
                 break
         
+        if chrome_binary:
+            options.binary_location = chrome_binary
+        else:
+            print("   ⚠️ Chrome not found in standard locations", flush=True)
+            print("   Available paths checked:", chrome_paths, flush=True)
+        
+        # Try to find chromedriver
+        driver_path = None
+        for path in chromedriver_paths:
+            if os.path.exists(path):
+                driver_path = path
+                print(f"   ✅ Found ChromeDriver at: {path}", flush=True)
+                break
+        
+        if not driver_path:
+            # Try webdriver-manager as fallback
+            try:
+                print("   ⚙️ Using webdriver-manager to install ChromeDriver...", flush=True)
+                driver_path = ChromeDriverManager().install()
+                print(f"   ✅ ChromeDriver installed at: {driver_path}", flush=True)
+            except Exception as e:
+                print(f"   ❌ webdriver-manager failed: {e}", flush=True)
+        
         try:
-            return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-        except:
-            pass
+            if driver_path:
+                return webdriver.Chrome(service=Service(driver_path), options=options)
+            else:
+                # Last resort - try without explicit path
+                return webdriver.Chrome(options=options)
+        except Exception as e:
+            print(f"   ❌ Chrome initialization failed: {e}", flush=True)
+            raise
     
-    # Local/Windows fallback
-    options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
-    if os.name == 'nt':
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    return webdriver.Chrome(options=options)
+    # === WINDOWS/LOCAL ENVIRONMENT ===
+    print("💻 Local Windows environment detected", flush=True)
+    try:
+        driver_path = ChromeDriverManager().install()
+        print(f"   ✅ ChromeDriver: {driver_path}", flush=True)
+        return webdriver.Chrome(service=Service(driver_path), options=options)
+    except Exception as e:
+        print(f"   ❌ Error: {e}", flush=True)
+        raise
 
 def csv_to_json_streaming(csv_path, json_path):
     """

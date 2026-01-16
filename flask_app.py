@@ -2,193 +2,313 @@ import os
 import json
 import threading
 import time
-from flask import Flask, Response, request
+from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
+import uuid
 
 app = Flask(__name__)
 CORS(app)
 
-# --- ULTRA-LIGHTWEIGHT CONFIGURATION ---
+# Configuration
 PROJECT_DIR = os.getcwd()
 CACHE_FILE = os.path.join(PROJECT_DIR, "data_cache.json")
 API_KEY = "shopify_secure_key_2025"
 CACHE_LOCK = threading.Lock()
 update_in_progress = False
+update_tasks = {}  # Track background tasks
 
-# Lightweight JSON record streaming
-def stream_json_records(file_path, limit=10, offset=0):
-    """
-    Generator that yields records from JSON file.
-    Loads file once, then streams records.
-    """
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        records = data.get('data', [])
-        
-        # Apply offset and limit
-        start_idx = offset
-        end_idx = min(offset + limit, len(records))
-        
-        for record in records[start_idx:end_idx]:
-            yield record
-            
-    except Exception as e:
-        print(f"Stream error: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-
-def get_lightweight_metadata():
-    """Get metadata without reading full file - ULTRA FAST"""
+def get_cached_data(start_row=None, end_row=None):
+    """Get data from cache file with optional row range"""
     if not os.path.exists(CACHE_FILE):
         return None
     
     try:
-        # Only read first 500 bytes to extract metadata
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        records = data.get('data', [])
+        total_count = data.get('count', len(records))
+        
+        # Apply row range if specified
+        if start_row is not None or end_row is not None:
+            start_idx = (start_row - 1) if start_row else 0
+            end_idx = end_row if end_row else len(records)
+            records = records[start_idx:end_idx]
+        
+        return {
+            'total_count': total_count,
+            'returned_count': len(records),
+            'start_row': (start_row or 1),
+            'end_row': (start_row or 1) + len(records) - 1 if records else 0,
+            'data': records,
+            'cached_at': time.ctime(os.path.getmtime(CACHE_FILE))
+        }
+    except Exception as e:
+        print(f"Error reading cache: {e}")
+        return None
+
+def trigger_background_scrape(task_id):
+    """Scrape fresh data in background"""
+    global update_in_progress
+    
+    try:
+        update_in_progress = True
+        update_tasks[task_id] = {
+            'status': 'running',
+            'started_at': time.time(),
+            'message': 'Scraping fresh data...'
+        }
+        
+        print(f"[{time.ctime()}] Background scrape started (task: {task_id})")
+        
+        # Import and run scraper
+        from sync_worker import perform_sync
+        perform_sync()
+        
+        # Update task status
+        update_tasks[task_id] = {
+            'status': 'completed',
+            'completed_at': time.time(),
+            'message': 'Fresh data ready!'
+        }
+        
+        print(f"[{time.ctime()}] Background scrape completed (task: {task_id})")
+        
+    except Exception as e:
+        update_tasks[task_id] = {
+            'status': 'failed',
+            'error': str(e),
+            'completed_at': time.time()
+        }
+        print(f"Background scrape error: {e}")
+    finally:
+        update_in_progress = False
+
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    """
+    Enhanced API endpoint:
+    - Returns cached data immediately
+    - Optionally triggers background refresh
+    - Supports row ranges
+    
+    Query Parameters:
+        - start_row: Starting row number (1-indexed)
+        - end_row: Ending row number (inclusive)
+        - refresh: If 'true', triggers background refresh
+        - wait_for_fresh: If 'true', waits for background refresh (NOT RECOMMENDED)
+    
+    Examples:
+        /api/data                           -> All cached data
+        /api/data?start_row=1&end_row=100   -> Rows 1-100
+        /api/data?refresh=true              -> Return cached + trigger refresh
+    """
+    # Auth check
+    if request.headers.get("X-API-Key") != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Parse parameters
+    start_row = request.args.get('start_row', type=int)
+    end_row = request.args.get('end_row', type=int)
+    refresh = request.args.get('refresh', 'false').lower() == 'true'
+    wait_for_fresh = request.args.get('wait_for_fresh', 'false').lower() == 'true'
+    
+    # Get cached data immediately
+    cached_data = get_cached_data(start_row, end_row)
+    
+    if cached_data is None:
+        return jsonify({
+            "error": "No cached data available",
+            "message": "Run sync_worker.py first to create cache"
+        }), 503
+    
+    # Prepare response
+    response_data = {
+        "status": "success",
+        "source": "cache",
+        "total_count": cached_data['total_count'],
+        "returned_count": cached_data['returned_count'],
+        "start_row": cached_data['start_row'],
+        "end_row": cached_data['end_row'],
+        "cached_at": cached_data['cached_at'],
+        "data": cached_data['data']
+    }
+    
+    # Trigger background refresh if requested
+    if refresh and not update_in_progress:
+        task_id = str(uuid.uuid4())[:8]
+        response_data['refresh_triggered'] = True
+        response_data['task_id'] = task_id
+        response_data['message'] = 'Returning cached data. Fresh data being fetched in background.'
+        response_data['check_status_url'] = f'/api/task/{task_id}'
+        
+        # Start background task
+        thread = threading.Thread(target=trigger_background_scrape, args=(task_id,), daemon=True)
+        thread.start()
+        
+    elif refresh and update_in_progress:
+        response_data['message'] = 'Refresh already in progress. Returning cached data.'
+    
+    return jsonify(response_data)
+
+@app.route('/api/data/fresh', methods=['GET'])
+def get_fresh_data():
+    """
+    Get fresh data with Server-Sent Events (SSE)
+    - Streams old data immediately
+    - Scrapes fresh data
+    - Streams updated data when ready
+    
+    Query Parameters:
+        - start_row: Starting row number
+        - end_row: Ending row number
+    """
+    # Auth check
+    if request.headers.get("X-API-Key") != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    start_row = request.args.get('start_row', type=int)
+    end_row = request.args.get('end_row', type=int)
+    
+    def generate():
+        # Step 1: Send cached data immediately
+        cached = get_cached_data(start_row, end_row)
+        
+        if cached:
+            yield f"data: {json.dumps({'type': 'cached', 'data': cached})}\n\n"
+        else:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'No cache available'})}\n\n"
+            return
+        
+        # Step 2: Notify starting refresh
+        yield f"data: {json.dumps({'type': 'status', 'message': 'Fetching fresh data...'})}\n\n"
+        
+        # Step 3: Scrape fresh data
+        try:
+            from sync_worker import perform_sync
+            perform_sync()
+            
+            # Step 4: Send fresh data
+            fresh = get_cached_data(start_row, end_row)
+            if fresh:
+                yield f"data: {json.dumps({'type': 'fresh', 'data': fresh})}\n\n"
+            
+            # Step 5: Send completion
+            yield f"data: {json.dumps({'type': 'complete', 'message': 'Fresh data ready'})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/api/task/<task_id>', methods=['GET'])
+def check_task_status(task_id):
+    """Check status of background task"""
+    if request.headers.get("X-API-Key") != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    if task_id not in update_tasks:
+        return jsonify({"error": "Task not found"}), 404
+    
+    task_info = update_tasks[task_id]
+    
+    # If task is completed, return fresh data
+    if task_info['status'] == 'completed':
+        start_row = request.args.get('start_row', type=int)
+        end_row = request.args.get('end_row', type=int)
+        fresh_data = get_cached_data(start_row, end_row)
+        
+        return jsonify({
+            "task_status": task_info['status'],
+            "message": task_info['message'],
+            "fresh_data": fresh_data
+        })
+    
+    return jsonify({
+        "task_status": task_info['status'],
+        "message": task_info.get('message', ''),
+        "error": task_info.get('error')
+    })
+
+@app.route('/api/metadata', methods=['GET'])
+def get_metadata():
+    """Get metadata without loading full data"""
+    if request.headers.get("X-API-Key") != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    if not os.path.exists(CACHE_FILE):
+        return jsonify({"error": "No cache available"}), 503
+    
+    try:
+        # Read only first few bytes for count
         with open(CACHE_FILE, 'r', encoding='utf-8') as f:
             partial = f.read(500)
-            
-        # Extract count using simple string parsing (no JSON loading)
+        
         if '"count":' in partial:
             start = partial.index('"count":') + 8
             end = partial.index(',', start)
             count = int(partial[start:end].strip())
         else:
             count = 0
-            
-        return {
-            'count': count,
+        
+        return jsonify({
+            'total_count': count,
             'file_size_kb': round(os.path.getsize(CACHE_FILE) / 1024, 2),
+            'file_size_mb': round(os.path.getsize(CACHE_FILE) / (1024 * 1024), 2),
             'last_modified': time.ctime(os.path.getmtime(CACHE_FILE))
-        }
-    except:
-        return None
-
-@app.route('/fetch-data', methods=['GET'])
-def fetch_data():
-    """
-    ULTRA-OPTIMIZED endpoint:
-    - Uses <2MB memory
-    - Returns in <0.01ms for light requests
-    - Streams records one-by-one
-    - force_fresh=true: Triggers background refresh, returns immediately
-    """
-    # Auth check
-    if request.headers.get("X-API-Key") != API_KEY:
-        return Response('{"error":"Unauthorized"}', status=401, mimetype='application/json')
-    
-    # Check for LIVE data request (non-blocking)
-    force_fresh = request.args.get('force_fresh') == 'true'
-    
-    if force_fresh:
-        # Trigger background refresh (DON'T WAIT - prevents timeout!)
-        global update_in_progress
-        if not update_in_progress:
-            def background_refresh():
-                global update_in_progress
-                update_in_progress = True
-                try:
-                    print(f"[{time.ctime()}] Background refresh triggered by force_fresh")
-                    from sync_worker import perform_sync
-                    perform_sync()
-                    print(f"[{time.ctime()}] Background refresh complete")
-                except Exception as e:
-                    print(f"Background refresh error: {e}")
-                finally:
-                    update_in_progress = False
-            
-            thread = threading.Thread(target=background_refresh, daemon=True)
-            thread.start()
-            
-            return Response(json.dumps({
-                "status": "refresh_triggered",
-                "message": "Background sync started. Cache will be updated in 30-60 seconds. Try again in a minute.",
-                "recommendation": "Use POST /refresh endpoint for background updates"
-            }), mimetype='application/json')
-        else:
-            return Response(json.dumps({
-                "status": "already_updating",
-                "message": "Sync already in progress. Try again in a minute."
-            }), mimetype='application/json')
-    
-    if not os.path.exists(CACHE_FILE):
-        return Response('{"error":"No data - run sync first"}', status=503, mimetype='application/json')
-    
-    # Ultra-lightweight params
-    try:
-        limit = min(int(request.args.get('limit', 10)), 100)  # Max 100 to save memory
-        offset = int(request.args.get('offset', 0))
-    except:
-        limit, offset = 10, 0
-    
-    metadata_only = request.args.get('metadata_only') == 'true'
-    
-    if metadata_only:
-        meta = get_lightweight_metadata()
-        return Response(json.dumps(meta or {}), mimetype='application/json')
-    
-    # Stream records as JSON
-    def generate():
-        yield '{"status":"success","data":['
-        first = True
-        for record in stream_json_records(CACHE_FILE, limit, offset):
-            if not first:
-                yield ','
-            yield json.dumps(record)
-            first = False
-        yield ']}'
-    
-    return Response(generate(), mimetype='application/json')
-
-@app.route('/refresh', methods=['POST'])
-def manual_refresh():
-    """Trigger background refresh"""
-    global update_in_progress
-    
-    if request.headers.get("X-API-Key") != API_KEY:
-        return Response('{"error":"Unauthorized"}', status=401)
-    
-    if update_in_progress:
-        return Response('{"status":"in_progress"}', status=202)
-    
-    def run_update():
-        global update_in_progress
-        try:
-            update_in_progress = True
-            from sync_worker import perform_sync
-            perform_sync()
-        finally:
-            update_in_progress = False
-    
-    threading.Thread(target=run_update, daemon=True).start()
-    return Response('{"status":"triggered"}', status=202)
-
-@app.route('/status', methods=['GET'])
-def status():
-    """Lightweight status check"""
-    if request.headers.get("X-API-Key") != API_KEY:
-        return Response('{"error":"Unauthorized"}', status=401)
-    
-    meta = get_lightweight_metadata()
-    if meta:
-        meta['update_in_progress'] = update_in_progress
-        return Response(json.dumps(meta), mimetype='application/json')
-    return Response('{"status":"no_cache"}', status=503)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
     """Health check"""
-    return Response('{"status":"ok"}', mimetype='application/json')
+    return jsonify({
+        "status": "ok",
+        "cache_exists": os.path.exists(CACHE_FILE),
+        "update_in_progress": update_in_progress
+    })
 
 if __name__ == '__main__':
-    print("ULTRA-LIGHTWEIGHT API - Memory optimized to <2MB")
-    print("Endpoints:")
-    print("  GET  /fetch-data?limit=10&offset=0  (cached data - FAST)")
-    print("  GET  /fetch-data?force_fresh=true   (LIVE data from DB - SLOWER)")
-    print("  GET  /fetch-data?metadata_only=true (metadata only)")
-    print("  POST /refresh (background sync)")
-    print("  GET  /status")
-    print("\n💡 TIP: Use force_fresh=true to get latest data from database!")
-    app.run(host='0.0.0.0', port=5000, debug=False)  # debug=False saves memory
+    print("\n" + "="*80)
+    print("🚀 ENHANCED SHOPIFY DATA API")
+    print("="*80)
+    print("\n📚 API Endpoints:")
+    print("\n1️⃣ Get Data (Immediate + Optional Background Refresh):")
+    print("   GET /api/data")
+    print("   GET /api/data?start_row=1&end_row=100")
+    print("   GET /api/data?refresh=true  (returns cached, refreshes in background)")
+    print("   GET /api/data?start_row=1&end_row=100&refresh=true")
+    
+    print("\n2️⃣ Get Fresh Data (Server-Sent Events - Real-time Updates):")
+    print("   GET /api/data/fresh")
+    print("   GET /api/data/fresh?start_row=1&end_row=100")
+    
+    print("\n3️⃣ Check Background Task Status:")
+    print("   GET /api/task/{task_id}")
+    
+    print("\n4️⃣ Get Metadata:")
+    print("   GET /api/metadata")
+    
+    print("\n5️⃣ Health Check:")
+    print("   GET /health")
+    
+    print("\n" + "="*80)
+    print("💡 USAGE TIPS:")
+    print("="*80)
+    print("\n📌 For Best User Experience:")
+    print("   1. Use /api/data with refresh=true")
+    print("   2. Show cached data to user immediately")
+    print("   3. Poll /api/task/{task_id} or use /api/data/fresh for updates")
+    
+    print("\n📌 Row Ranges:")
+    print("   - start_row is 1-indexed (starts at 1, not 0)")
+    print("   - end_row is inclusive")
+    print("   - Example: start_row=1&end_row=100 returns rows 1 to 100")
+    
+    print("\n📌 All requests require X-API-Key header")
+    print(f"   X-API-Key: {API_KEY}")
+    
+    print("\n" + "="*80 + "\n")
+    
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

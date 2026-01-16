@@ -93,8 +93,29 @@ def get_driver():
             # Try webdriver-manager as fallback
             try:
                 print("   ⚙️ Using webdriver-manager to install ChromeDriver...", flush=True)
-                driver_path = ChromeDriverManager().install()
-                print(f"   ✅ ChromeDriver installed at: {driver_path}", flush=True)
+                installed_path = ChromeDriverManager().install()
+                print(f"   📁 webdriver-manager returned: {installed_path}", flush=True)
+                
+                # Fix: webdriver-manager sometimes returns wrong file
+                # Find actual chromedriver executable in the directory
+                if os.path.isfile(installed_path):
+                    driver_dir = os.path.dirname(installed_path)
+                else:
+                    driver_dir = installed_path
+                
+                # Look for actual chromedriver executable
+                for filename in ['chromedriver', 'chromedriver.exe']:
+                    potential_path = os.path.join(driver_dir, filename)
+                    if os.path.exists(potential_path) and os.path.isfile(potential_path):
+                        driver_path = potential_path
+                        print(f"   ✅ Found actual ChromeDriver at: {driver_path}", flush=True)
+                        break
+                
+                if not driver_path:
+                    # Fallback: use what webdriver-manager gave us
+                    driver_path = installed_path
+                    print(f"   ⚠️ Using webdriver-manager path as-is: {driver_path}", flush=True)
+                    
             except Exception as e:
                 print(f"   ❌ webdriver-manager failed: {e}", flush=True)
         
@@ -111,8 +132,26 @@ def get_driver():
     # === WINDOWS/LOCAL ENVIRONMENT ===
     print("💻 Local Windows environment detected", flush=True)
     try:
-        driver_path = ChromeDriverManager().install()
-        print(f"   ✅ ChromeDriver: {driver_path}", flush=True)
+        installed_path = ChromeDriverManager().install()
+        print(f"   📁 webdriver-manager returned: {installed_path}", flush=True)
+        
+        # Fix: Find actual chromedriver executable
+        if os.path.isfile(installed_path):
+            driver_dir = os.path.dirname(installed_path)
+        else:
+            driver_dir = installed_path
+        
+        driver_path = None
+        for filename in ['chromedriver.exe', 'chromedriver']:
+            potential_path = os.path.join(driver_dir, filename)
+            if os.path.exists(potential_path) and os.path.isfile(potential_path):
+                driver_path = potential_path
+                print(f"   ✅ Found ChromeDriver at: {driver_path}", flush=True)
+                break
+        
+        if not driver_path:
+            driver_path = installed_path
+        
         return webdriver.Chrome(service=Service(driver_path), options=options)
     except Exception as e:
         print(f"   ❌ Error: {e}", flush=True)

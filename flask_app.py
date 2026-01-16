@@ -17,7 +17,32 @@ CACHE_LOCK = threading.Lock()
 update_in_progress = False
 update_tasks = {}  # Track background tasks
 
-def get_cached_data(start_row=None, end_row=None):
+def parse_destination_field(record):
+    """Parse the destination field from string to JSON object"""
+    if 'destination' in record and record['destination']:
+        try:
+            # The destination is double-encoded JSON string
+            # First decode: removes outer quotes
+            # Second decode: parses the actual JSON
+            destination_str = record['destination']
+            
+            # Remove outer quotes if present
+            if destination_str.startswith('"') and destination_str.endswith('"'):
+                destination_str = destination_str[1:-1]
+            
+            # Unescape the JSON string
+            destination_str = destination_str.replace('\\\"', '"').replace('\\\\', '\\')
+            
+            # Parse to JSON object
+            record['destination'] = json.loads(destination_str)
+        except Exception as e:
+            # If parsing fails, keep original string
+            print(f"Warning: Could not parse destination field: {e}")
+            pass
+    
+    return record
+
+def get_cached_data(start_row=None, end_row=None, parse_json=True):
     """Get data from cache file with optional row range"""
     if not os.path.exists(CACHE_FILE):
         return None
@@ -34,6 +59,10 @@ def get_cached_data(start_row=None, end_row=None):
             start_idx = (start_row - 1) if start_row else 0
             end_idx = end_row if end_row else len(records)
             records = records[start_idx:end_idx]
+        
+        # Parse destination field for each record
+        if parse_json:
+            records = [parse_destination_field(record.copy()) for record in records]
         
         return {
             'total_count': total_count,
@@ -91,17 +120,19 @@ def get_data():
     - Returns cached data immediately
     - Optionally triggers background refresh
     - Supports row ranges
+    - Automatically parses destination field to JSON
     
     Query Parameters:
         - start_row: Starting row number (1-indexed)
         - end_row: Ending row number (inclusive)
         - refresh: If 'true', triggers background refresh
-        - wait_for_fresh: If 'true', waits for background refresh (NOT RECOMMENDED)
+        - parse_json: If 'false', keeps destination as string (default: true)
     
     Examples:
-        /api/data                           -> All cached data
+        /api/data                           -> All cached data (destination parsed)
         /api/data?start_row=1&end_row=100   -> Rows 1-100
         /api/data?refresh=true              -> Return cached + trigger refresh
+        /api/data?parse_json=false          -> Keep destination as string
     """
     # Auth check
     if request.headers.get("X-API-Key") != API_KEY:
@@ -111,10 +142,10 @@ def get_data():
     start_row = request.args.get('start_row', type=int)
     end_row = request.args.get('end_row', type=int)
     refresh = request.args.get('refresh', 'false').lower() == 'true'
-    wait_for_fresh = request.args.get('wait_for_fresh', 'false').lower() == 'true'
+    parse_json = request.args.get('parse_json', 'true').lower() == 'true'
     
     # Get cached data immediately
-    cached_data = get_cached_data(start_row, end_row)
+    cached_data = get_cached_data(start_row, end_row, parse_json)
     
     if cached_data is None:
         return jsonify({

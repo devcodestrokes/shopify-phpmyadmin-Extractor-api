@@ -43,32 +43,30 @@ def get_driver():
     options.add_argument('--proxy-bypass-list=*')
     options.add_experimental_option("prefs", {"download.default_directory": DOWNLOAD_DIR})
     
-    # === PYTHONANYWHERE DETECTION ===
-    is_pythonanywhere = (
-        'PYTHONANYWHERE_DOMAIN' in os.environ or 
-        'PYTHONANYWHERE_SITE' in os.environ or
-        os.path.exists('/home') and not os.path.exists('C:\\')
-    )
-    
-    if is_pythonanywhere:
-        print("🐍 PythonAnywhere environment detected", flush=True)
+    # === ENVIRONMENT DETECTION ===
+    if os.name == 'posix':
+        print("� Linux environment detected (likely Render)", flush=True)
         
-        # Try multiple Chrome/Chromium paths (PythonAnywhere-specific)
+        # Standard Linux paths
         chrome_paths = [
-            "/usr/bin/chromium",
-            "/usr/bin/chromium-browser", 
             "/usr/bin/google-chrome",
             "/usr/bin/google-chrome-stable",
-            "/snap/bin/chromium"
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser"
         ]
+        chromedriver_paths = ["/usr/bin/chromedriver", "/usr/local/bin/chromedriver"]
         
-        chromedriver_paths = [
-            "/usr/bin/chromedriver",
-            "/usr/local/bin/chromedriver",
-            "/home/{}/.local/bin/chromedriver".format(os.environ.get('USER', 'unknown'))
-        ]
-        
-        chrome_binary = None
+    else:
+        # Windows / Local
+        print("� Local Windows environment detected", flush=True)
+        chrome_paths = []
+        chromedriver_paths = []
+
+    # === DRIVER SETUP (Shared Logic) ===
+    
+    # 1. Find Chrome Binary (Linux only usually needs this explicit path if not in PATH)
+    chrome_binary = None
+    if os.name == 'posix':
         for path in chrome_paths:
             if os.path.exists(path):
                 chrome_binary = path
@@ -78,83 +76,78 @@ def get_driver():
         if chrome_binary:
             options.binary_location = chrome_binary
         else:
-            print("   ⚠️ Chrome not found in standard locations", flush=True)
-            print("   Available paths checked:", chrome_paths, flush=True)
-        
-        # Try to find chromedriver
-        driver_path = None
-        for path in chromedriver_paths:
-            if os.path.exists(path):
-                driver_path = path
-                print(f"   ✅ Found ChromeDriver at: {path}", flush=True)
-                break
-        
-        if not driver_path:
-            # Try webdriver-manager as fallback
-            try:
-                print("   ⚙️ Using webdriver-manager to install ChromeDriver...", flush=True)
-                installed_path = ChromeDriverManager().install()
-                print(f"   📁 webdriver-manager returned: {installed_path}", flush=True)
-                
-                # Fix: webdriver-manager sometimes returns wrong file
-                # Find actual chromedriver executable in the directory
-                if os.path.isfile(installed_path):
-                    driver_dir = os.path.dirname(installed_path)
-                else:
-                    driver_dir = installed_path
-                
-                # Look for actual chromedriver executable
-                for filename in ['chromedriver', 'chromedriver.exe']:
-                    potential_path = os.path.join(driver_dir, filename)
-                    if os.path.exists(potential_path) and os.path.isfile(potential_path):
-                        driver_path = potential_path
-                        print(f"   ✅ Found actual ChromeDriver at: {driver_path}", flush=True)
-                        break
-                
-                if not driver_path:
-                    # Fallback: use what webdriver-manager gave us
-                    driver_path = installed_path
-                    print(f"   ⚠️ Using webdriver-manager path as-is: {driver_path}", flush=True)
-                    
-            except Exception as e:
-                print(f"   ❌ webdriver-manager failed: {e}", flush=True)
-        
-        try:
-            if driver_path:
-                return webdriver.Chrome(service=Service(driver_path), options=options)
-            else:
-                # Last resort - try without explicit path
-                return webdriver.Chrome(options=options)
-        except Exception as e:
-            print(f"   ❌ Chrome initialization failed: {e}", flush=True)
-            raise
+            print("   ⚠️ Chrome not found in standard paths, hoping it's on PATH...", flush=True)
+
+    # 2. Find/Install ChromeDriver
+    driver_path = None
     
-    # === WINDOWS/LOCAL ENVIRONMENT ===
-    print("💻 Local Windows environment detected", flush=True)
+    # Check pre-installed paths first (Linux)
+    for path in chromedriver_paths:
+        if os.path.exists(path):
+            driver_path = path
+            print(f"   ✅ Found System ChromeDriver at: {path}", flush=True)
+            break
+    
+    if not driver_path:
+        # Use webdriver-manager
+        try:
+            print("   ⚙️ Using webdriver-manager to install ChromeDriver...", flush=True)
+            installed_path = ChromeDriverManager().install()
+            print(f"   📁 webdriver-manager returned: {installed_path}", flush=True)
+            
+            # Robustly find the actual executable (Fixes "THIRD_PARTY_NOTICES" bug)
+            possible_files = []
+            if os.path.isfile(installed_path):
+                driver_dir = os.path.dirname(installed_path)
+                possible_files.append(installed_path)
+            else:
+                driver_dir = installed_path
+            
+            # Walk the directory to find the binary
+            found_binary = None
+            for root, dirs, files in os.walk(driver_dir):
+                for filename in files:
+                    # Match likely executable names
+                    if filename == 'chromedriver' or filename == 'chromedriver.exe':
+                        full_path = os.path.join(root, filename)
+                        
+                        # Explicitly ignore known non-binaries
+                        if "THIRD_PARTY_NOTICES" in full_path:
+                            continue
+                            
+                        found_binary = full_path
+                        break
+                if found_binary:
+                    break
+            
+            if found_binary:
+                driver_path = found_binary
+                print(f"   ✅ Found actual ChromeDriver executable at: {driver_path}", flush=True)
+                
+                # Ensure it is executable on Linux
+                if os.name == 'posix':
+                    st = os.stat(driver_path)
+                    os.chmod(driver_path, st.st_mode | 0o111)
+            else:
+                # Fallback if walk failed but installed_path exists
+                if os.path.exists(installed_path) and "THIRD_PARTY_NOTICES" not in installed_path:
+                     driver_path = installed_path
+                     print(f"   ⚠️ Using raw path (verification failed): {driver_path}", flush=True)
+                else:
+                     print(f"   ❌ Could not locate valid chromedriver binary in {driver_dir}", flush=True)
+
+        except Exception as e:
+            print(f"   ❌ webdriver-manager failed: {e}", flush=True)
+    
     try:
-        installed_path = ChromeDriverManager().install()
-        print(f"   📁 webdriver-manager returned: {installed_path}", flush=True)
-        
-        # Fix: Find actual chromedriver executable
-        if os.path.isfile(installed_path):
-            driver_dir = os.path.dirname(installed_path)
+        if driver_path:
+            print(f"   🚀 Launching Chrome with driver: {driver_path}", flush=True)
+            return webdriver.Chrome(service=Service(driver_path), options=options)
         else:
-            driver_dir = installed_path
-        
-        driver_path = None
-        for filename in ['chromedriver.exe', 'chromedriver']:
-            potential_path = os.path.join(driver_dir, filename)
-            if os.path.exists(potential_path) and os.path.isfile(potential_path):
-                driver_path = potential_path
-                print(f"   ✅ Found ChromeDriver at: {driver_path}", flush=True)
-                break
-        
-        if not driver_path:
-            driver_path = installed_path
-        
-        return webdriver.Chrome(service=Service(driver_path), options=options)
+            print("   ⚠️ No specific driver found, letting Selenium auto-detect...", flush=True)
+            return webdriver.Chrome(options=options)
     except Exception as e:
-        print(f"   ❌ Error: {e}", flush=True)
+        print(f"   ❌ Chrome initialization failed: {e}", flush=True)
         raise
 
 def csv_to_json_streaming(csv_path, json_path):
